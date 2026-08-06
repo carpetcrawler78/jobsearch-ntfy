@@ -1,13 +1,31 @@
-name: Daily Ntfy
+name: Ntfy Outbox
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "smoke sends one safe test; outbox processes Google Sheets"
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - outbox
   schedule:
-    - cron: "0 7 * * *"
+    # Every five minutes, offset from the top of the hour to reduce queue delays.
+    - cron: "3-58/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jobsearch-ntfy-outbox
+  cancel-in-progress: false
 
 jobs:
-  notify:
+  deliver:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Check out repository
@@ -17,19 +35,43 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-      - name: Run script
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate ntfy configuration
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'smoke'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: test -n "$NTFY_TOPIC" || (echo "Missing Actions secret NTFY_TOPIC" && exit 1)
+
+      - name: Send safe smoke test
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'smoke'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python src/main.py --smoke-test
+
+      - name: Validate outbox configuration
+        if: github.event_name == 'schedule' || inputs.mode == 'outbox'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$NTFY_TOPIC" || (echo "Missing Actions secret NTFY_TOPIC" && exit 1)
+          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || (echo "Missing Actions secret GOOGLE_SERVICE_ACCOUNT_JSON" && exit 1)
+
+      - name: Process NTFY_OUTBOX
+        if: github.event_name == 'schedule' || inputs.mode == 'outbox'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          NTFY_TOPIC: jobsearch-8f3k2
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SPREADSHEET_ID: 1BQJX4Kd0sYfROzbi1m0RoLJqfC2GJTUfuFBDxhkxmXo
+          MAX_ATTEMPTS: "3"
+          MAX_MESSAGES_PER_RUN: "10"
         run: python src/main.py
-
-#Kurz dazu:
-#workflow_dispatch erlaubt manuelles Starten in GitHub.
-#schedule läuft täglich um 07:00 UTC.
-#Das Secret wird nur am Python-Schritt gesetzt, also schön eng begrenzt.
-#NTFY_TOPIC passt zu https://ntfy.sh/jobsearch-8f3k2.
-#Wichtig: Das YML allein reicht noch nicht vollständig, wenn src/main.py noch nicht auf GOOGLE_SERVICE_ACCOUNT_JSON ausgelegt ist

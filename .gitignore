@@ -1,7 +1,5 @@
 .venv/
-.venv
-/.venv/
-**pycache**/
-*.pyc
+__pycache__/
+*.py[cod]
 .env
-.github/
+.DS_Store
