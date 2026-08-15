@@ -109,6 +109,22 @@ def build_values_service() -> Any:
     sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     return sheets.spreadsheets().values()
 
+NTFY_TITLE_REPLACEMENTS = str.maketrans({
+    "ä": "ae", "ö": "oe", "ü": "ue",
+    "Ä": "Ae", "Ö": "Oe", "Ü": "Ue",
+    "ß": "ss",
+    "–": "-", "—": "-",
+    "„": '"', "“": '"', "”": '"',
+    "’": "'", "\u00a0": " ",
+})
+
+
+def safe_ntfy_title(title: str) -> str:
+    return (
+        title.translate(NTFY_TITLE_REPLACEMENTS)
+        .encode("ascii", errors="replace")
+        .decode("ascii")[:200]
+    )
 
 def send_notification(
     *,
@@ -123,7 +139,7 @@ def send_notification(
         url,
         data=body.encode("utf-8"),
         headers={
-            "Title": title,
+            "Title": safe_ntfy_title(title),
             "Priority": priority,
             "Content-Type": "text/plain; charset=utf-8",
         },
