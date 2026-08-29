@@ -4,32 +4,32 @@ External notification bridge for the private job-search pipeline.
 
 ## Architecture
 
-1. ChatGPT schedulers write sanitized notifications to `Jobs_Masterliste → NTFY_OUTBOX`.
+1. ChatGPT schedulers write sanitized notifications to `Jobs_Masterliste → NTFY_OUTBOX!A:F`.
 2. GitHub Actions polls the outbox every five minutes.
-3. `src/main.py` sends `PENDING` or `RETRY` rows to ntfy.
-4. The worker writes `SENT`, `RETRY`, or `ERROR`, attempt count, HTTP status and timestamp back to the sheet.
+3. `src/main.py` treats a populated row with blank `G` as pending and also processes explicit `PENDING` or `RETRY` states.
+4. The worker writes `SENT`, `RETRY`, `ERROR`, attempt count, HTTP status and timestamp to `G:K`.
 
-ChatGPT never calls `ntfy.sh` directly.
+ChatGPT never calls `ntfy.sh` directly. Producer and worker ownership do not overlap.
 
 ## Outbox schema
 
 `NTFY_OUTBOX!A:K`
 
-| Column | Field |
-|---|---|
-| A | message_id |
-| B | created_at |
-| C | source |
-| D | title |
-| E | body |
-| F | priority |
-| G | status |
-| H | attempts |
-| I | http_status |
-| J | sent_at |
-| K | error |
+| Column | Field | Owner |
+|---|---|---|
+| A | message_id | Producer |
+| B | created_at | Producer |
+| C | source | Producer |
+| D | title | Producer |
+| E | body | Producer |
+| F | priority | Producer |
+| G | status | Worker |
+| H | attempts | Worker |
+| I | http_status | Worker |
+| J | sent_at | Worker |
+| K | error | Worker |
 
-Producer-owned fields are A:H. The GitHub worker owns G:K after delivery attempts.
+Blank `G` is the normal initial state. `SKIPPED_STALE` is a terminal migration state for legacy notifications that must remain in history but must not be delivered later.
 
 ## Required GitHub Actions secrets
 
@@ -59,13 +59,16 @@ The spreadsheet ID is already configured in the workflow.
 
 Scheduled runs process the outbox automatically.
 
-## Retry behavior
+## Retry and idempotency behavior
 
-- Eligible statuses: `PENDING`, `RETRY`.
-- Maximum attempts: 3.
-- Any HTTP 2xx is success.
+- Eligible states: blank, `PENDING`, `RETRY`.
+- Blank grid rows and terminal states are ignored.
+- Maximum ntfy delivery attempts: 3.
+- Google Sheets reads and status writes retry retryable transport/HTTP failures up to 5 times with exponential backoff.
+- Any ntfy HTTP 2xx is success.
 - Network errors and non-2xx responses become `RETRY`, then `ERROR` after the final attempt.
-- A failed delivery makes the GitHub Actions run fail visibly.
+- A failed delivery or exhausted Sheets operation makes GitHub Actions fail visibly.
+- A deterministic ntfy sequence ID derived from `message_id` prevents client-side duplicate notifications when delivery succeeds but the following Sheet write has to be retried.
 - `concurrency` prevents overlapping scheduled/manual runs in this repository.
 
 ## Security

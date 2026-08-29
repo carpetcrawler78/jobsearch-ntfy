@@ -74,4 +74,5 @@ jobs:
           SPREADSHEET_ID: 1BQJX4Kd0sYfROzbi1m0RoLJqfC2GJTUfuFBDxhkxmXo
           MAX_ATTEMPTS: "3"
           MAX_MESSAGES_PER_RUN: "10"
+          GOOGLE_MAX_ATTEMPTS: "5"
         run: python src/main.py
